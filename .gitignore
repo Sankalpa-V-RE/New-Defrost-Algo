@@ -1,0 +1,26 @@
+# STM32CubeIDE build output
+/Debug/
+/Release/
+
+# Compiler and linker artifacts
+*.o
+*.d
+*.su
+*.cyclo
+*.elf
+*.map
+*.list
+*.hex
+*.bin
+*.srec
+
+# Local editor and operating-system files
+*.bak
+*.tmp
+*~
+.DS_Store
+Thumbs.db
+
+# Logs and captured test data are kept outside version control by default
+*.log
+*.csv
