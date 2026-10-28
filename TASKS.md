@@ -1,6 +1,6 @@
 # Defrost Controller Task Tracker
 
-Last updated: 2026-10-15
+Last updated: 2026-10-28
 
 This file tracks decisions, investigations, implementation, and verification. Maintain it whenever the plan or project status changes.
 
@@ -26,16 +26,31 @@ Checkbox meaning:
 - [x] **A12 — Record single-sensor limitation.** Local temperature cannot certify the warmest cabinet or food temperature.
 - [x] **A13 — Define CubeIDE file-ownership rule.** Use `.ioc` for generated hardware configuration, Cube `USER CODE` regions for small integrations, and separate owned modules for application logic.
 - [x] **A14 — Select and configure the internal system clock.** HSI48 divided by 4 supplies a 12 MHz system/peripheral clock; HSE pins are not configured.
+- [x] **A15 — Reject reliance on one conditioned installation reference.** The production algorithm must not require customer commissioning or assume that a single learned site profile remains valid; uncontrolled placement and environment can invalidate it.
+- [x] **A16 — Permit guarded contextual online learning.** Learning may adapt to current operating conditions, but must separate short-term context from a protected trusted wet, low-ice reference and must not use captured UART logs for training or tuning.
+- [x] **A17 — Select conservative scheduled bootstrap.** Start without a trusted model, wait for a predefined conservative elapsed-time/cold-exposure condition, perform a safety-bounded defrost, quarantine recovery, and form a candidate reference only from subsequently qualified thermostat cycles.
+- [x] **A18 — Define normal temperature behavior conceptually.** Normal refrigerator operation is recurring thermostat-driven cooling/warming legs with a sawtooth-like temperature trajectory, not a fixed stable temperature.
+- [x] **A19 — Select contextual-reference architecture.** Compare capacitance with a guarded wet, low-ice reference for the applicable temperature-region and thermal-direction context; do not decide from raw capacitance and do not normalize by sensor-noise variation.
+- [x] **A20 — Select combined bootstrap trigger concept.** Use credible cold exposure together with a maximum elapsed-time boundary; elapsed time alone must not force an unjustified warming event without frost-forming exposure.
+- [x] **A21 — Record sensor transition directions.** Treat liquid-water capacitance rise, freezing-associated fall, and melting-associated rise as sensor-design inputs; temperature-only capacitance change and thermal lag are negligible, while contamination or a retained water film may permanently shift the baseline.
+- [x] **A22 — Record sensor material-state ordering.** At comparable conditions, capacitance endpoints are ordered dry < fully ice-covered < liquid water; absolute values and separations remain installation-dependent.
+- [x] **A23 — Define the ice-growth response and target.** Capacitance falls as ice accumulates and approaches a lower plateau when thick ice fully covers the sensor. Trigger from the earlier persistent contextual downward trend; the plateau is an overdue backstop, not the normal target. Do not infer numerical ice thickness.
+- [x] **A24 — Require a hybrid defrost trigger.** Permit earlier triggering from qualified phase/event confidence, but retain conservative cold-exposure scheduling as an independent fallback when qualified capacitance evidence is absent, interrupted, or insufficient.
+- [x] **A25 — Define the installed reference state.** The sensor is expected never to be dry; use a wet, low-ice post-defrost reference. Thick ice is the lowest contextual in-service condition, but not a universal raw threshold or quantitative thickness measurement.
+- [x] **A26 — Remove sensor noise as an algorithm dependency.** Sensor noise is sufficiently low not to affect the capacitance trend; retain validity, persistence, hysteresis, and defensive normalization checks, but do not derive thresholds from noise.
+- [x] **A27 — Select qualified defrost-cycle excursion scaling.** Use the previous qualified pre-defrost-to-after-melt capacitance excursion as the primary adaptive magnitude scale, compare by fixed-point cross-multiplication, and retain wet-to-initial-freeze swing only as optional event evidence.
+- [x] **A28 — Require candidate/trusted reference separation.** Aborted or uncertain defrosts cannot update the trusted model; after-melt and excursion candidates require qualified local melt, recovery quarantine, credible thermostat cycles, integrity/context checks, and bounded commit rules.
 
 ## B. Blocking hardware and protocol questions
 
 - [x] **B01 — Confirm temperature and capacitance byte order.** All multi-byte sensor fields are big-endian; record a real-frame decoding example during board testing.
-- [ ] **B02 — Define valid sensor ranges and sentinel values.** Obtain sensor specifications or characterize invalid outputs.
+- [ ] **B02 — Complete the sensor numerical contract.** Define valid ranges, saturation behavior, and sentinel/invalid outputs; sensor noise does not require further algorithm characterization.
 - [ ] **B03 — Verify PA4 unpowered behavior.** Measure possible back-power current and select the safe GPIO state while PA6 is LOW.
 - [ ] **B04 — Verify relay gate pull-down.** Confirm whether a gate-to-ground resistor exists; add one if absent and validate reset waveforms.
 - [ ] **B05 — Complete relay and mains review.** Verify compressor inrush/motor rating, contact mapping, suppression, fuse, clearance, creepage, and failure modes.
 - [ ] **B06 — Measure sensor startup/stream timing.** Capture power enable, first byte timing, frame repetition, and shutdown behavior with test equipment.
 - [ ] **B07 — Validate generated clock configuration in CubeIDE.** Open the `.ioc`, confirm HSI48 divided by 4 and 12 MHz SYSCLK/HCLK/PCLK, regenerate, and confirm no unintended configuration changes.
+- [x] **B08 — Classify ice-coverage response.** Accumulating ice produces a detectable downward contextual trend and full thick coverage produces a lower plateau. Use the early trend for control and the plateau only as an overdue backstop; do not treat capacitance as a calibrated thickness measurement.
 
 ## C. Parameters still requiring discussion
 
@@ -51,14 +66,15 @@ Checkbox meaning:
 ## D. Pattern-algorithm design
 
 - [ ] **D01 — Define signal-quality layer.** Validity, freshness, plausibility, CRC/UART error handling, and missing-data behavior.
-- [ ] **D02 — Choose robust filters.** Bounded median/outlier rejection and short/long fixed-point trends suitable for 6 KB SRAM.
-- [ ] **D03 — Define self-reference representation.** Temperature-conditioned history, cycle representation, normalization, memory limits, and bounded adaptation.
+- [ ] **D02 — Choose trend estimators.** Define bounded short/long fixed-point temperature and capacitance slopes for cycle classification, moderate-ice trend detection, and plateau backstop; do not add noise-driven filtering without another stated need.
+- [ ] **D03 — Define dual-timescale representation.** Specify temperature bins, thermal-direction states, short-term context state, trusted/candidate wet references and defrost-cycle excursions, confidence and age, signed residual, cross-multiplied trigger fraction, invalid-excursion fallback, storage, and memory limits.
 - [ ] **D04 — Define disturbance detector.** Door-like warming, hot/steaming load, condensation, installation/ambient drift, and recovery holdoff patterns.
-- [ ] **D05 — Define ice-confidence pattern.** Required feature agreement, accumulation/decay, persistence, repeatability, hysteresis, and confirmation rules.
+- [ ] **D05 — Define hybrid ice-trigger arbitration.** Specify qualified phase/event confidence, accumulation/decay, persistence, hysteresis, and how it combines with the independent cold-exposure fallback without treating absent capacitance evidence as proof of no ice.
 - [ ] **D06 — Define melt-confidence pattern.** Defrost-start reference, transition sequence, wet-versus-frozen response, stability, hysteresis, and success rules.
 - [ ] **D07 — Define unsuccessful-defrost outcomes.** Distinguish verified success, upper-temperature abort, maximum-time abort, sensor-fault abort, and reset abort.
-- [ ] **D08 — Define adaptation guards.** Specify when learning is frozen, when clean/reference history may update, and the maximum permitted adaptation rate.
+- [ ] **D08 — Define learning guards and invalidation.** Specify bootstrap, pre-defrost capture, qualified local-melt candidate creation, recovery verification, candidate commit/rejection, freeze conditions, bounded update rate, confidence/age decay, transient-state reset, persistent-reference invalidation, and recovery after installation/environment changes.
 - [ ] **D09 — Define algorithm resource budget.** Flash, SRAM, stack, execution time, and worst-case interrupt latency.
+- [ ] **D10 — Specify scheduled-bootstrap and recovery qualification.** Define the bootstrap schedule/cold-exposure condition, bounded-defrost outcome requirements, recovery quarantine, required credible cooling/warming legs, candidate-reference commit criteria, and no-reference fallback.
 
 ## E. Measurement and experimental work
 

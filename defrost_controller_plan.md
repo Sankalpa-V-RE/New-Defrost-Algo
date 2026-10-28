@@ -135,6 +135,24 @@ Log one CSV record per acquisition on PA2 at 115200 baud with timestamp, sequenc
 
 The measurement-only firmware must keep the relay de-energized and contains no automatic ice decision or defrost action.
 
+### 5.4 Sensor physical-response contract
+
+The following are sensor-design inputs supplied for algorithm specification; they are not conclusions derived from captured UART logs:
+
+- Liquid water causes the reported capacitance to rise.
+- When liquid water freezes, the reported capacitance falls.
+- When ice melts back to liquid water, the expected transition direction is therefore a capacitance rise.
+- At comparable conditions, a fully ice-covered sensor has higher capacitance than a completely dry sensor. Together, the supplied endpoint ordering is **dry < ice < liquid water**.
+- In the installed refrigerator the sensor is expected never to be dry. Within the relevant in-service wet/ice operating range, the lowest contextual capacitance condition corresponds to thick ice.
+- Direct temperature dependence of the capacitance output is negligible.
+- Temperature accuracy is high and sensor thermal lag is negligible for this application.
+- Sensor noise is sufficiently low that it is not expected to affect the capacitance trend used by the algorithm; no noise-derived ice threshold is required.
+- Contamination or a persistent water film can permanently shift the capacitance baseline.
+
+The endpoint ordering among **dry**, **frozen ice**, and **liquid water** is now specified, but absolute values and separations are intentionally not. The dry endpoint is outside expected installed operation. As ice accumulates over the wet sensor, capacitance falls until thick ice fully covers the sensing region; at that point the reading approaches a lower plateau and appears to stop falling. Reaching this plateau means detection was too late for the intended control objective. Normal defrost triggering must therefore use the earlier persistent downward deviation/trend from the qualified wet, low-ice contextual reference, supported by frost opportunity and persistence. Plateau detection may serve only as an overdue backstop, never as the normal target. Capacitance still must not be converted into a quantitative ice-thickness or ice-mass estimate. "Lowest means thick ice" is a contextual ordering, not a universal raw threshold. Valid numerical ranges, saturation behavior, and invalid/sentinel outputs remain open; sensor noise is declared negligible for algorithm design.
+
+In this plan, a **trusted reference** means a qualified wet, low-ice post-defrost operating reference; it is never a dry reference. A persistent water film or contamination may be part of the current qualified baseline, provided the learning gates and recovery rules accept it. The algorithm must detect later phase transitions relative to that shifted context rather than trying to force the reference toward the lower but irrelevant dry endpoint.
+
 ## 6. Operating-state model
 
 The exact state machine will be designed after requirements review, but it must separate at least these responsibilities:
@@ -143,7 +161,7 @@ The exact state machine will be designed after requirements review, but it must 
 2. **Normal monitoring:** permit refrigerator operation and collect periodic sensor measurements.
 3. **Ice-candidate confirmation:** require sustained multi-sample evidence and reject known disturbances.
 4. **Defrost active:** energize the relay, monitor melt evidence and all hard limits.
-5. **Defrost completion/recovery:** de-energize the relay, observe the post-defrost response, update the adaptive baseline only when justified, and prevent immediate retriggering.
+5. **Defrost completion/recovery:** de-energize the relay, observe the post-defrost response, discard or reset event-local comparison state as specified, and prevent immediate retriggering.
 6. **Fault/disabled automatic defrost:** keep the relay de-energized while reporting diagnostics.
 
 ## 7. Defrost control policy
@@ -227,7 +245,7 @@ The watchdog is required, but watchdog recovery must lead to the safe de-energiz
 
 Parameters are compiled into firmware during the experimental phase. Do not persist them merely for convenience.
 
-EEPROM use must be justified item by item. Possible future uses include a versioned adaptive baseline, bounded diagnostic counters, or an interrupted-defrost marker. Any stored structure must use versioning, integrity checking, atomic/dual-record updates where needed, and wear-aware write frequency. Loss or corruption of EEPROM must not prevent normal refrigerator operation.
+EEPROM use must be justified item by item. A single permanently conditioned installation profile is not sufficient, but a versioned trusted reference produced by the approved guarded online-learning algorithm may be considered. Possible future uses also include bounded diagnostic counters or an interrupted-defrost marker. Any stored structure must use versioning, integrity checking, atomic/dual-record updates where needed, and wear-aware write frequency. Loss or corruption of EEPROM must not prevent normal refrigerator operation.
 
 No EEPROM-dependent algorithm has yet been approved.
 
@@ -237,28 +255,78 @@ No EEPROM-dependent algorithm has yet been approved.
 
 UART measurement logs are for communication bring-up, frame decoding, fault diagnosis, and human visibility only. Recorded log data must not be used to select algorithm features, derive thresholds, tune windows or confidence values, train a model, identify ice/melt patterns, or justify conclusions about algorithm correctness.
 
-The future controller may use its own live sensor history at runtime as part of a self-referenced deterministic algorithm. That in-device history is operational state, not an offline dataset, and it must not be copied into fixed production thresholds.
+The future controller may use bounded sensor history and guarded online learning to adapt to current conditions. That in-device history is operational state, not an offline dataset. Captured UART logs remain prohibited as algorithm-development or tuning data.
 
 Before automatic relay control is enabled, the algorithm, parameters, state transitions, and safety bounds must be specified independently and version-frozen. Subsequent testing must use acceptance criteria written before the test. A failed test invalidates the frozen design; recorded logs must not be mined to retrofit or tune it unless the user explicitly changes this rule.
 
 The production algorithm must identify **temporal and state-transition patterns**, not compare raw temperature or capacitance against installation-specific ice values. Absolute capacitance, absolute change magnitude, and fixed dry/iced values may vary substantially with refrigerator construction, sensor mounting, environment, contamination, age, and location.
 
-The intended pattern approach is self-referenced:
+Customer commissioning and reliance on one conditioned reference learned from an assumed clean installation are rejected. Fridge location, ambient conditions, loading, airflow, and usage are not controlled, so an unguarded persistent site profile can normalize the wrong condition or drift into accepting ice as normal. Online learning is allowed only when it adapts to current context and protects a trusted wet, low-ice reference with explicit qualification, freeze, rate-limit, invalidation, and recovery rules.
 
-- Compare the sensor primarily with its own recent and long-term history.
-- Normalize changes relative to locally observed range, noise, and cycle behavior where practical.
+The selected high-level architecture is a guarded, context-adaptive detector with a conservative scheduled bootstrap. Its detailed equations and constants are not yet approved. The architecture must obey these constraints:
+
+- Do not require customer commissioning or a factory/site-specific capacitance profile.
+- Maintain separate short-term context state and slow trusted wet, low-ice reference state; do not let an unqualified short-term condition overwrite the trusted state.
+- Permit trusted-reference updates only from qualified post-defrost recovery or another independently justified clean-state gate.
+- Freeze learning during suspected ice, defrost, sensor faults, door/hot-load-like disturbances, and unstable recovery.
+- Bound update magnitude and rate, retain confidence/age metadata, and invalidate or re-bootstrap models after discontinuities that make them untrustworthy.
+- Short-lived comparisons within the current cooling, warming, or deliberate-defrost event may be used and reset when the event becomes invalid.
+- Prefer dimensionless direction, ordering, persistence, and bounded within-event change over installation-specific absolute capacitance.
 - Condition capacitance behavior on temperature history rather than treat capacitance independently.
-- Use direction, rate, persistence, sequence, plateau behavior, and repeatability across cooling cycles.
+- Use direction, rate, persistence, sequence, and physically justified transition behavior.
 - Accumulate confidence from multiple agreeing features; no single sample or feature may confirm ice or melt completion.
 - Use separate entry and exit confidence with hysteresis so the state cannot chatter.
-- Freeze adaptation during suspected ice, defrost, sensor faults, door/hot-load-like disturbances, and post-defrost instability.
-- Update an adaptive clean/reference model only during trusted stable recovery periods and limit the maximum adaptation per unit time so real ice cannot be learned as normal.
+- Reset or invalidate event-local comparison state during sensor faults, door/hot-load-like disturbances, resets, and other broken observation sequences; preserve a persistent trusted reference only if its version, integrity, age, and confidence checks pass.
 - Keep hard safety ceilings for time, temperature, faults, and relay activity independent from the pattern detector.
+
+For each qualified temperature-region and thermal-direction context, the trusted model will represent at least wet/low-ice reference capacitance, confidence, and age. A current measurement is first interpreted using a signed contextual residual rather than raw capacitance:
+
+`residual = measured_capacitance - contextual_reference_capacitance`
+
+Sensor noise is declared negligible, so the algorithm will not normalize this residual by a learned noise or ordinary-variation estimate. The selected primary adaptive magnitude scale is the **qualified defrost-cycle excursion**, not the wet-to-initial-freeze phase swing.
+
+Before a qualified defrost begins, capture a robust pre-defrost capacitance. After local melting is qualified, capture a candidate wet capacitance:
+
+`reference_excursion = qualified_after_melt_capacitance - qualified_before_defrost_capacitance`
+
+During the next accumulation period:
+
+`current_drop = trusted_wet_reference - measured_capacitance`
+
+Trigger comparison uses a configurable fraction of the trusted excursion without division:
+
+`current_drop * fraction_denominator >= trusted_reference_excursion * fraction_numerator`
+
+The configured fraction is an operational trigger point, not a physical ice-coverage percentage. A reference excursion below its minimum valid magnitude is ineligible; capacitance-based triggering is then unavailable and the conservative cold-exposure fallback remains authoritative. The wet-to-initial-freeze swing may still contribute optional freezing/recovery event evidence, but it is not stored or required as the accumulation denominator.
+
+Reference updates use two stages. A newly observed after-melt value and excursion are **candidates** only. A candidate may be committed to the trusted model only after the defrost ends as qualified local melt success, recovery quarantine completes, subsequent thermostat cycles are credible, integrity/context checks pass, and bounded-update rules accept it. Temperature-ceiling, maximum-time, sensor-fault, reset, or otherwise uncertain defrost outcomes cannot update the trusted reference. The first bootstrap candidate has limited confidence and the conservative schedule remains authoritative until later qualification confirms the model.
+
+The supplied sensor response gives physically meaningful endpoint and phase-transition directions. From a dry condition, full ice coverage has a higher endpoint; liquid water has a still-higher endpoint, although dry is not expected in service. A water-arrival/wetting event moves capacitance upward; freezing and subsequent ice accumulation move it downward toward the thick-ice plateau; melting moves it upward again. The algorithm should trigger from a qualified persistent downward contextual deviation and trend while slope remains meaningfully negative, before it approaches the low-slope plateau. These transitions may contribute to confidence only when their temperature ordering, frost opportunity, persistence, context, and disturbance checks also agree. A high value alone cannot distinguish water from ice, and a downward transition alone cannot distinguish freezing, gradual accumulation, drainage, removal, contamination shift, or sensor drift. Negligible sensor noise removes the need for a noise-derived threshold but does not remove data-validity checks, persistence, hysteresis, or arithmetic denominator guards.
+
+### 11.2 Operating context, recovery, and bootstrap
+
+The refrigerator does not maintain one stable temperature. Its thermostat creates recurring cooling and warming legs, producing an approximately sawtooth temperature trajectory. Therefore, **normal operation** means credible recurring thermostat-driven cycles, not a flat temperature. The contextual model must at least distinguish temperature region and thermal direction; the same temperature on a cooling leg and a warming leg may legitimately have different capacitance behavior.
+
+**Recovery** is a quarantined transient after deliberate defrost or a major disturbance. After defrost terminates and compressor power is made available again, temperature returns from the warmed condition toward recurring thermostat cycling; liquid water may drain, redistribute, or refreeze, and capacitance may still be settling. A similar recovery interval follows door/hot-load-like disturbances. Recovery is not a clean reference by definition. Trusted-reference learning remains disabled until predefined qualification rules show valid sensor data, absence of known disturbance, and a sufficient number of credible alternating cooling/warming legs. The required cycle count and consistency bounds remain open parameters.
+
+The selected startup approach is **conservative scheduled bootstrap**:
+
+1. Start with no trusted wet, low-ice reference model and keep the relay de-energized so normal refrigerator control remains available.
+2. Monitor valid temperature/capacitance and accumulate a conservative cold-exposure condition while also enforcing a maximum elapsed-time boundary; do not make a learned ice decision yet. The combination must be specified so elapsed time alone cannot force an unjustified warming event when credible frost-forming exposure has not occurred.
+3. When the bootstrap condition is satisfied, capture the qualified pre-defrost capacitance and perform one bounded defrost using independent time, temperature, sensor-fault, and relay-protection limits.
+4. If local melt success is qualified, capture candidate after-melt wet capacitance and candidate defrost-cycle excursion; an abort cannot produce reference candidates.
+5. Treat the subsequent interval as recovery quarantine; do not immediately declare its data clean.
+6. Verify the candidate against qualified recurring cooling/warming cycles after recovery.
+7. Commit the candidate only after its predefined confidence, consistency, and bounded-update requirements pass. If bootstrap defrost aborts or recovery never qualifies, retain no trusted reference and enter the specified conservative fallback behavior.
+
+Bootstrap timing, cold-exposure calculation, interaction with the maximum elapsed-time boundary, required recovery cycles, candidate-commit rules, and fallback behavior remain unresolved and must be defined before implementation.
+
+The same cold-exposure/schedule mechanism remains required after bootstrap as a conservative fallback. It must cover direct frost that accumulates below the capacitance detector's observable boundary. A sensor-confirmed phase event may permit an earlier defrost, but absence of capacitance evidence cannot prove absence of ice. Conversely, elapsed time without credible frost-forming exposure must not force an unnecessary defrost. Exact arbitration between event confidence and the conservative fallback remains open.
 
 Ice detection and melt detection are separate pattern recognizers:
 
-- **Ice pattern:** a persistent, temperature-consistent change away from the sensor's established cycle behavior that repeats or strengthens across suitable cold cycles and is not explained by a detected disturbance.
-- **Melt pattern:** after deliberate compressor inhibition, a coherent sequence in temperature and capacitance that matches the locally learned/validated freezing-to-melting transition, followed by a stable post-transition condition. Crossing 0 degrees Celsius or returning to one capacitance value is not sufficient by itself.
+- **Ice pattern:** persistent frost opportunity combined with either (a) a qualified downward contextual residual/trend, optionally expressed by an approved wet-to-initial-freeze phase-scaled accumulation index, or (b) an upward wetting transition followed by a freezing-associated capacitance fall. Trigger at reasonable moderate coverage while the downward trend is still observable, before it reaches the low-slope full-coverage plateau. The evidence must not be explained by a disturbance. Conservative cold-exposure scheduling remains an independent fallback, and an observed thick-ice plateau is an overdue backstop rather than the normal trigger.
+- **Melt pattern:** after deliberate compressor inhibition, temperature rises through the melting region and capacitance makes a persistent upward transition consistent with ice becoming liquid water. Interpret the transition both relative to defrost-start state and any qualified trusted model, and require a stable post-transition condition. Crossing 0 degrees Celsius, observing one rising sample, or returning to one capacitance value is not sufficient by itself; retained meltwater may keep the capacitance elevated.
 
 Candidate pattern features to reason about from physical behavior include relative baseline movement, robust short- and long-window slopes, change-point detection, persistence, temperature/capacitance phase relationship, cycle-to-cycle shape changes, time spent in relevant thermal regions, melting-region plateau behavior, and post-defrost recovery. All calculations must be feasible with bounded memory and fixed-point integer arithmetic on the STM32C011. Selection must be justified before examining captured logs.
 
