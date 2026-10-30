@@ -19,8 +19,8 @@ Checkbox meaning:
 - [x] **A05 — Separate serial interfaces.** Sensor uses USART2/PA4 at 9600 baud; PA2 software-UART logs at 115200 baud with lower priority.
 - [x] **A06 — Define sensor frame and CRC coverage.** Eight-byte framed response and CRC-16/CCITT-FALSE coverage are documented.
 - [x] **A07 — Choose power-triggered sensor acquisition concept.** Arm reception before PA6 power-on, accept a valid streamed frame, power off after 10 ms, and retry by bounded power cycling.
-- [x] **A08 — Choose initial defrost termination policy.** Use melt evidence plus independent hard ceilings; do not regulate around 4 degrees Celsius initially.
-- [x] **A09 — Record provisional experimental ceilings.** Local sensor ceiling 4 degrees Celsius and maximum defrost time 6 hours; neither is production-approved.
+- [x] **A08 — Choose defrost control policy.** Use guarded learned melt evidence, hysteretic 2-to-4-degree band control, and independent hard aborts.
+- [x] **A09 — Record defrost time limit.** Maximum duration is a rebuild-time parameter initially set to four hours; the configured value is mandatory. A separate emergency over-temperature/time-above-band policy remains required.
 - [x] **A10 — Choose initial reset/power-loss policy.** Abandon defrost, de-energize relay, and return control to the refrigerator; do not auto-resume.
 - [x] **A11 — Choose algorithm principle.** Use self-referenced temporal/state-transition patterns and confidence, not installation-specific raw capacitance values.
 - [x] **A12 — Record single-sensor limitation.** Local temperature cannot certify the warmest cabinet or food temperature.
@@ -40,14 +40,30 @@ Checkbox meaning:
 - [x] **A26 — Remove sensor noise as an algorithm dependency.** Sensor noise is sufficiently low not to affect the capacitance trend; retain validity, persistence, hysteresis, and defensive normalization checks, but do not derive thresholds from noise.
 - [x] **A27 — Select qualified defrost-cycle excursion scaling.** Use the previous qualified pre-defrost-to-after-melt capacitance excursion as the primary adaptive magnitude scale, compare by fixed-point cross-multiplication, and retain wet-to-initial-freeze swing only as optional event evidence.
 - [x] **A28 — Require candidate/trusted reference separation.** Aborted or uncertain defrosts cannot update the trusted model; after-melt and excursion candidates require qualified local melt, recovery quarantine, credible thermostat cycles, integrity/context checks, and bounded commit rules.
+- [x] **A29 — Select temperature-weighted cold exposure.** Accumulate saturating degree-time from valid samples below a configurable freezing guard; ordinary thermostat warming does not erase exposure, while invalid/stale data and door/disturbance recovery pause accumulation without clearing it.
+- [x] **A30 — Select scheduled-due arbitration.** Trigger scheduling at required cold exposure, or only when maximum elapsed time and a separate minimum cold exposure are both satisfied; elapsed time alone cannot initiate defrost.
+- [x] **A31 — Keep the door input unused.** Door input is reserved for future implementation and has no effect on monitoring, learning, exposure, active defrost, or recovery; physical door events remain environmental scenarios only.
+- [x] **A32 — Remove door-dependent defrost behavior.** Active defrost responds only to sensor state, learned melt logic, band thresholds, and hard limits; no door signal is read.
+- [x] **A33 — Define the high-level local-melt sequence.** Use no minimum duration; evaluate immediately and require temperature at/above the configurable 2-degree lower edge plus qualification by the learned capacitance melt model. Hard aborts remain independent and success creates candidates only.
+- [x] **A34 — Define the 4-degree role.** Treat 4 degrees Celsius as the configurable upper defrost-band edge. Reaching it permits thermostat-controlled compressor cooling and continues defrost; it is neither success nor abort.
+- [x] **A35 — Define the melt-success temperature gate.** Require sensor temperature at or above the configurable lower band edge initially set to 2 degrees Celsius, in addition to learned capacitance melt qualification.
+- [x] **A36 — Select hysteretic defrost-band control.** At/below 2 degrees inhibit the compressor; at/above 4 degrees permit thermostat-controlled cooling; hold the current substate between edges and keep the overall defrost timer running.
+- [x] **A37 — Require online learning for capacitance melt success.** Learn wet endpoint/context, defrost excursion, upward-transition shape, wet-side stabilization, confidence, and age through candidate/trusted gates; use physical rules only to bootstrap the first low-confidence candidate.
+- [x] **A38 — Define emergency defrost temperature protections.** Abort immediately at a configurable emergency ceiling initially 6 degrees Celsius, or after configurable cumulative time above the 4-degree upper band initially 10 minutes; pause the cumulative timer below the band and reset it only when the session ends.
+- [x] **A39 — Select three-event melt-model promotion.** Promote NO_MODEL → PROVISIONAL after one qualified event, → CONFIRMED after two mutually consistent events, and → TRUSTED after three; restrict the first two levels, count no aborts, and never average inconsistent candidates into the model.
+- [x] **A40 — Require live relay actuation.** Final firmware must drive the real relay from the approved state machine; permanently forced-de-energized/shadow-only operation is not acceptable, while every fail-safe path still releases the relay.
+- [x] **A41 — Use hysteresis without a relay dwell timer.** No separate minimum relay-energized or general relay-state dwell is required. The 2-to-4-degree band provides normal anti-chatter behavior; melt success, the upper-band transition, and every safety/fault abort remain immediate.
+- [x] **A42 — Define controller event priority.** Emergency ceiling precedes sensor/fault abort, maximum duration, cumulative-above-band abort, melt success, band transition, and a new defrost trigger.
+- [x] **A43 — Define failed-defrost handling.** Immediately release the relay, reject candidates, clear session-local melt state, and apply an initial configurable 4-hour failed-attempt lockout; after recovery require new evidence rather than retaining an immediately pending request.
+- [x] **A44 — Centralize rebuild-time parameters.** Use project-owned `Core/Inc/defrost_config.h` with unit, purpose, tuning-direction, and constraint comments plus compile-time relationship checks; keep pins/peripherals in the Cube `.ioc`.
 
 ## B. Blocking hardware and protocol questions
 
 - [x] **B01 — Confirm temperature and capacitance byte order.** All multi-byte sensor fields are big-endian; record a real-frame decoding example during board testing.
-- [ ] **B02 — Complete the sensor numerical contract.** Define valid ranges, saturation behavior, and sentinel/invalid outputs; sensor noise does not require further algorithm characterization.
+- [ ] **B02 — Complete the sensor numerical contract later.** Valid ranges, saturation behavior, and sentinel/invalid outputs are deferred; CRC, timeout, UART-error, and stale-data handling remain required now.
 - [ ] **B03 — Verify PA4 unpowered behavior.** Measure possible back-power current and select the safe GPIO state while PA6 is LOW.
-- [ ] **B04 — Verify relay gate pull-down.** Confirm whether a gate-to-ground resistor exists; add one if absent and validate reset waveforms.
-- [ ] **B05 — Complete relay and mains review.** Verify compressor inrush/motor rating, contact mapping, suppression, fuse, clearance, creepage, and failure modes.
+- [x] **B04 — Defer relay gate hardware review from firmware scope.** User directed that hardware need not be considered; firmware still implements fail-safe GPIO behavior without making a hardware-safety claim.
+- [x] **B05 — Defer relay and mains review from firmware scope.** Contact/inrush rating, suppression, fuse, clearance, creepage, and hardware failure modes are outside the current firmware task.
 - [ ] **B06 — Measure sensor startup/stream timing.** Capture power enable, first byte timing, frame repetition, and shutdown behavior with test equipment.
 - [ ] **B07 — Validate generated clock configuration in CubeIDE.** Open the `.ioc`, confirm HSI48 divided by 4 and 12 MHz SYSCLK/HCLK/PCLK, regenerate, and confirm no unintended configuration changes.
 - [x] **B08 — Classify ice-coverage response.** Accumulating ice produces a detectable downward contextual trend and full thick coverage produces a lower plateau. Use the early trend for control and the plateau only as an overdue backstop; do not treat capacitance as a calibrated thickness measurement.
@@ -55,22 +71,24 @@ Checkbox meaning:
 ## C. Parameters still requiring discussion
 
 - [x] **C01 — Select initial measurement sample cadence.** Schedule an acquisition every 2 seconds and skip missed slots after overrunning retries. Production cadence remains a later decision.
-- [ ] **C02 — Select active-defrost sample cadence.** Must detect melt transitions and safety limits promptly.
-- [ ] **C03 — Validate acquisition retry policy.** Initial firmware uses three attempts and 100 ms sensor-off interval; consecutive-failure behavior and final production values remain open.
-- [ ] **C04 — Select relay protection timings.** Minimum state duration, normal-operation interval between attempts, recovery interval, and failed-attempt lockout.
-- [ ] **C05 — Define temperature/time safety validation criteria.** Determine how provisional 4-degree and 6-hour limits will be accepted, reduced, or rejected.
-- [ ] **C06 — Decide whether the door input enters production control.** Initial experiments may log door events manually, but resilience may require the direct input.
+- [x] **C02 — Select active-defrost sample cadence.** Use the same 2-second acquisition interval as monitoring for the initial firmware.
+- [x] **C03 — Select initial acquisition failure policy.** Normal monitoring uses three attempts with 100 ms sensor-off intervals; active defrost uses one 2000 ms attempt per cycle and at least 100 ms off between cycles. Abort after an initial configurable 10 consecutive active-defrost failures (about 20–21 seconds), resetting the counter on a valid frame.
+- [x] **C04 — Complete initial relay timing.** Repeated 2-to-4-degree cycling is allowed within an active defrost; no minimum relay dwell is required; a 4-hour lockout follows successful completion; and an initial configurable 4-hour failed-attempt lockout follows an abort.
+- [ ] **C05 — Validate temperature-band/time safety parameters.** Validate configurable 2-degree lower and 4-degree upper band edges, 6-degree emergency ceiling, 10-minute cumulative-above-band limit, hysteretic switching behavior, and maximum duration initially four hours against cabinet-wide safety requirements. Temperature alone is never melt evidence.
+- [x] **C06 — Keep door input out of current production control.** Future implementation only; no debounce or door-state logic is required now.
 - [ ] **C07 — Decide whether another cabinet temperature sensor is required.** Required if the controller must guarantee the warmest cabinet location.
 - [ ] **C08 — Decide justified EEPROM contents.** Do not store parameters or adaptive state until recovery, integrity, wear, and failure behavior are defined.
+- [x] **C09 — Remove active-defrost door logic.** Door input is unused; active defrost has no door-dependent branch.
+- [x] **C10 — Complete initial cold-exposure representation.** Use saturating `uint32_t` centi-degree-Celsius-seconds, add only each valid on-schedule two-second interval, saturate at 1,800,000, use 360,000 for the 24-hour fallback minimum, and reset exposure/elapsed time after every attempt.
 
 ## D. Pattern-algorithm design
 
 - [ ] **D01 — Define signal-quality layer.** Validity, freshness, plausibility, CRC/UART error handling, and missing-data behavior.
-- [ ] **D02 — Choose trend estimators.** Define bounded short/long fixed-point temperature and capacitance slopes for cycle classification, moderate-ice trend detection, and plateau backstop; do not add noise-driven filtering without another stated need.
-- [ ] **D03 — Define dual-timescale representation.** Specify temperature bins, thermal-direction states, short-term context state, trusted/candidate wet references and defrost-cycle excursions, confidence and age, signed residual, cross-multiplied trigger fraction, invalid-excursion fallback, storage, and memory limits.
-- [ ] **D04 — Define disturbance detector.** Door-like warming, hot/steaming load, condensation, installation/ambient drift, and recovery holdoff patterns.
+- [x] **D02 — Choose initial ice trend estimators.** Use one-minute aggregates, 5-minute short and 60-minute long contexts, 15-minute downward persistence, 5-minute persistence at the trusted 0.75 excursion level, and retain qualified downward history for 2 hours as a plateau backstop.
+- [ ] **D03 — Define dual-timescale representation.** Initial learned trigger fraction is 0.75 represented as 3/4. Still specify temperature bins, thermal-direction states, short-term context state, trusted/candidate wet references and defrost-cycle excursions, confidence and age, invalid-excursion fallback, storage, and memory limits.
+- [ ] **D04 — Complete sensor-inferred disturbance bounds.** Selected behavior: normal-monitoring only; freeze confidence/learning, pause but preserve exposure, continue elapsed time, require two credible thermostat cycles, and invalidate persistent offsets. Still define the learned normal-cycle envelope bounds; do not use the door input.
 - [ ] **D05 — Define hybrid ice-trigger arbitration.** Specify qualified phase/event confidence, accumulation/decay, persistence, hysteresis, and how it combines with the independent cold-exposure fallback without treating absent capacitance evidence as proof of no ice.
-- [ ] **D06 — Define melt-confidence pattern.** Defrost-start reference, transition sequence, wet-versus-frozen response, stability, hysteresis, and success rules.
+- [ ] **D06 — Complete the learned melt-confidence model.** Initial/bootstrap rule is selected: five-sample `C_start`, 10-second blocks, 1-minute transition at 75% upward direction for three evaluations, 5-minute relative stabilization, 25% reversal rejection, band-state continuity, and 2-degree gate. Still specify later-event consistency, candidate verification/commit, aging, and bounded adaptation.
 - [ ] **D07 — Define unsuccessful-defrost outcomes.** Distinguish verified success, upper-temperature abort, maximum-time abort, sensor-fault abort, and reset abort.
 - [ ] **D08 — Define learning guards and invalidation.** Specify bootstrap, pre-defrost capture, qualified local-melt candidate creation, recovery verification, candidate commit/rejection, freeze conditions, bounded update rate, confidence/age decay, transient-state reset, persistent-reference invalidation, and recovery after installation/environment changes.
 - [ ] **D09 — Define algorithm resource budget.** Flash, SRAM, stack, execution time, and worst-case interrupt latency.
@@ -94,8 +112,8 @@ Checkbox meaning:
 - [ ] **F01 — Implement safe early startup and GPIO states.** Relay must remain de-energized through initialization and all failure paths.
 - [ ] **F02 — Implement watchdog and reset-cause handling.** Reset aborts defrost and returns normal control.
 - [ ] **F03 — Complete USART2 sensor receiver and CRC verification.** Big-endian decoding, stream resynchronization, timeout, retry, and multiple-frame handling are implemented and compile cleanly; known-answer/unit tests and board verification remain.
-- [ ] **F04 — Complete PA2 software-UART logging.** Experimental blocking 115200-baud output is implemented for measurement-only operation after sensor power-off. Waveform validation and the production timer-driven bounded implementation remain.
-- [ ] **F05 — Implement monotonic timekeeping and named compile-time parameters.** Handle timer wraparound safely.
+- [ ] **F04 — Complete PA2 controller-aware logging.** The CSV schema and measurement-only context fields are implemented: timestamp, sequence, formatted Celsius, capacitance, defrost/state/relay/event fields, timers/exposure, failure/protocol diagnostics, and frame hex. Populate live controller state/events after F06; waveform validation and the production timer-driven bounded transmitter remain.
+- [ ] **F05 — Implement monotonic timekeeping and consume the dedicated parameter header.** `Core/Inc/defrost_config.h` now defines and documents the initial parameters; controller code must use it without duplicate policy constants and must handle timer wraparound safely.
 - [ ] **F06 — Implement explicit controller state machine.** Boot, monitoring, disturbance, suspicion, confirmed ice, defrost, melt verification, recovery, and fault states.
 - [ ] **F07 — Implement the version-frozen pattern detector.** Only after its specification and prewritten acceptance criteria are complete; do not derive it from captured logs.
 - [ ] **F08 — Implement EEPROM records only if approved.** Versioning, CRC, atomic recovery, and wear tests required.
@@ -106,7 +124,7 @@ Checkbox meaning:
 - [ ] **G02 — Test sensor timeout, retry, stuck stream, noise, partial frame, and implausible data.**
 - [ ] **G03 — Measure software-UART interference and worst-case interrupt latency.**
 - [ ] **G04 — Test relay behavior during boot, watchdog reset, brownout, debugger activity, and firmware hangs.**
-- [ ] **G05 — Inject every defrost termination path.** Melt success, 4-degree ceiling, 6-hour ceiling, sensor fault, reset, and internal fault.
+- [ ] **G05 — Inject every defrost control/termination path.** Learned melt success at the 2-degree gate, 4-degree cooling-permitted transition, repeated band cycling, 6-degree emergency abort, 10-minute cumulative-above-band abort, maximum-duration timeout initially four hours, sensor fault, reset, internal fault, and door-open cases.
 - [ ] **G06 — Run environmental/confounder verification.** Use the frozen design and acceptance criteria written before testing; do not tune from captured logs.
 - [ ] **G07 — Validate cabinet-wide food-temperature safety.** Production limits cannot be approved without this evidence.
 - [ ] **G08 — Run long-duration endurance testing.** Include relay cycles, sensor power cycles, resets, drift, and any EEPROM writes.

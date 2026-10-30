@@ -21,6 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "defrost_config.h"
 #include "measurement_logger.h"
 #include "sensor_reader.h"
 
@@ -33,8 +34,6 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define SENSOR_MEASUREMENT_PERIOD_MILLISECONDS  2000U
-
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -53,6 +52,7 @@ UART_HandleTypeDef huart2;
 /* USER CODE BEGIN PV */
 static uint32_t measurement_sequence_number;
 static uint32_t next_measurement_tick;
+static uint8_t consecutive_sensor_failures;
 
 /* USER CODE END PV */
 
@@ -109,6 +109,7 @@ int main(void)
   MeasurementLogger_Initialize();
   MeasurementLogger_WriteHeader();
   measurement_sequence_number = 0U;
+  consecutive_sensor_failures = 0U;
   next_measurement_tick = HAL_GetTick();
 
   /* USER CODE END 2 */
@@ -127,17 +128,44 @@ int main(void)
     if ((int32_t)(current_tick - next_measurement_tick) >= 0)
     {
       SensorReaderResult sensor_result;
+      MeasurementLoggerControllerContext log_context;
       uint32_t acquisition_start_tick = current_tick;
 
-      (void)SensorReader_Acquire(&huart2, &hiwdg, &sensor_result);
+      bool sensor_valid = SensorReader_Acquire(
+          &huart2,
+          &hiwdg,
+          DEFROST_CFG_NORMAL_ATTEMPTS_PER_ACQUISITION,
+          &sensor_result);
+
+      if (sensor_valid)
+      {
+        consecutive_sensor_failures = 0U;
+      }
+      else if (consecutive_sensor_failures < UINT8_MAX)
+      {
+        ++consecutive_sensor_failures;
+      }
+
+      log_context.controller_state = "MEASUREMENT_ONLY";
+      log_context.event = "NONE";
+      log_context.defrost_active = false;
+      log_context.relay_energized =
+          ((RELAY_GPIO_Port->ODR & RELAY_Pin) != 0U);
+      log_context.cold_exposure_cdegc_seconds = 0U;
+      log_context.session_elapsed_milliseconds = 0U;
+      log_context.above_upper_band_milliseconds = 0U;
+      log_context.lockout_remaining_milliseconds = 0U;
+      log_context.consecutive_sensor_failures = consecutive_sensor_failures;
+
       MeasurementLogger_WriteResult(acquisition_start_tick,
                                     measurement_sequence_number,
+                                    &log_context,
                                     &sensor_result);
       ++measurement_sequence_number;
 
       do
       {
-        next_measurement_tick += SENSOR_MEASUREMENT_PERIOD_MILLISECONDS;
+        next_measurement_tick += DEFROST_CFG_SAMPLE_INTERVAL_MS;
       } while ((int32_t)(HAL_GetTick() - next_measurement_tick) >= 0);
     }
 

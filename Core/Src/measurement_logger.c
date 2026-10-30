@@ -1,18 +1,16 @@
 #include "measurement_logger.h"
 
+#include "defrost_config.h"
 #include "main.h"
 #include "software_uart.h"
 
 #include <stddef.h>
 
-#define LOG_BUFFER_LENGTH  192U
-#define DEBUG_LOG_BAUD_RATE  115200U
-
 static size_t MeasurementLogger_AppendCharacter(char *buffer,
                                                 size_t position,
                                                 char character)
 {
-  if (position < (LOG_BUFFER_LENGTH - 1U))
+  if (position < (DEFROST_CFG_LOG_BUFFER_BYTES - 1U))
   {
     buffer[position] = character;
     ++position;
@@ -24,7 +22,13 @@ static size_t MeasurementLogger_AppendText(char *buffer,
                                            size_t position,
                                            const char *text)
 {
-  while ((*text != '\0') && (position < (LOG_BUFFER_LENGTH - 1U)))
+  if (text == NULL)
+  {
+    return position;
+  }
+
+  while ((*text != '\0') &&
+         (position < (DEFROST_CFG_LOG_BUFFER_BYTES - 1U)))
   {
     buffer[position] = *text;
     ++position;
@@ -137,22 +141,38 @@ void MeasurementLogger_Initialize(void)
 {
   SoftwareUart_Initialize(softUART_TX_GPIO_Port,
                           softUART_TX_Pin,
-                          DEBUG_LOG_BAUD_RATE);
+                          DEFROST_CFG_DEBUG_LOG_BAUD);
 }
 
 void MeasurementLogger_WriteHeader(void)
 {
-  SoftwareUart_Write("\r\nUART_READY,115200,8N1\r\n");
-  SoftwareUart_Write("ms,sequence,status,relay_energized,temperature_c,temperature_raw_x100,capacitance_raw_be,attempts,crc_errors,frame_errors,uart_errors,acquisition_ms,frame_hex\r\n");
+  char ready_buffer[DEFROST_CFG_LOG_BUFFER_BYTES];
+  size_t position = 0U;
+
+  position = MeasurementLogger_AppendText(ready_buffer, position, "\r\nUART_READY,");
+  position = MeasurementLogger_AppendUnsigned(
+      ready_buffer,
+      position,
+      DEFROST_CFG_DEBUG_LOG_BAUD);
+  position = MeasurementLogger_AppendText(ready_buffer, position, ",8N1\r\n");
+  ready_buffer[position] = '\0';
+  SoftwareUart_Write(ready_buffer);
+  SoftwareUart_Write("ms,sequence,sensor_status,temperature_c,capacitance_pf,defrost_active,controller_state,relay_energized,event,cold_exposure_cdegc_s,session_elapsed_ms,above_upper_ms,lockout_remaining_ms,consecutive_failures,attempts,crc_errors,frame_errors,uart_errors,acquisition_ms,frame_hex\r\n");
 }
 
 void MeasurementLogger_WriteResult(uint32_t acquisition_start_milliseconds,
                                    uint32_t sequence_number,
+                                   const MeasurementLoggerControllerContext *context,
                                    const SensorReaderResult *result)
 {
-  char buffer[LOG_BUFFER_LENGTH];
+  char buffer[DEFROST_CFG_LOG_BUFFER_BYTES];
   size_t position = 0U;
   uint8_t byte_index;
+
+  if ((context == NULL) || (result == NULL))
+  {
+    return;
+  }
 
   position = MeasurementLogger_AppendUnsigned(buffer, position, acquisition_start_milliseconds);
   position = MeasurementLogger_AppendCharacter(buffer, position, ',');
@@ -160,28 +180,13 @@ void MeasurementLogger_WriteResult(uint32_t acquisition_start_milliseconds,
   position = MeasurementLogger_AppendCharacter(buffer, position, ',');
   position = MeasurementLogger_AppendText(buffer, position, MeasurementLogger_StatusText(result->status));
   position = MeasurementLogger_AppendCharacter(buffer, position, ',');
-  position = MeasurementLogger_AppendUnsigned(
-      buffer,
-      position,
-      ((RELAY_GPIO_Port->ODR & RELAY_Pin) != 0U) ? 1U : 0U);
-  position = MeasurementLogger_AppendCharacter(buffer, position, ',');
 
   if (result->status == SENSOR_READER_STATUS_VALID)
   {
     position = MeasurementLogger_AppendSignedHundredths(
         buffer,
         position,
-        result->temperature_celsius);
-  }
-
-  position = MeasurementLogger_AppendCharacter(buffer, position, ',');
-
-  if (result->status == SENSOR_READER_STATUS_VALID)
-  {
-    position = MeasurementLogger_AppendSigned(
-        buffer,
-        position,
-        result->temperature_celsius);
+        result->temperature_centi_celsius);
   }
 
   position = MeasurementLogger_AppendCharacter(buffer, position, ',');
@@ -191,6 +196,24 @@ void MeasurementLogger_WriteResult(uint32_t acquisition_start_milliseconds,
     position = MeasurementLogger_AppendUnsigned(buffer, position, result->capacitance_picofarads);
   }
 
+  position = MeasurementLogger_AppendCharacter(buffer, position, ',');
+  position = MeasurementLogger_AppendUnsigned(buffer, position, context->defrost_active ? 1U : 0U);
+  position = MeasurementLogger_AppendCharacter(buffer, position, ',');
+  position = MeasurementLogger_AppendText(buffer, position, context->controller_state);
+  position = MeasurementLogger_AppendCharacter(buffer, position, ',');
+  position = MeasurementLogger_AppendUnsigned(buffer, position, context->relay_energized ? 1U : 0U);
+  position = MeasurementLogger_AppendCharacter(buffer, position, ',');
+  position = MeasurementLogger_AppendText(buffer, position, context->event);
+  position = MeasurementLogger_AppendCharacter(buffer, position, ',');
+  position = MeasurementLogger_AppendUnsigned(buffer, position, context->cold_exposure_cdegc_seconds);
+  position = MeasurementLogger_AppendCharacter(buffer, position, ',');
+  position = MeasurementLogger_AppendUnsigned(buffer, position, context->session_elapsed_milliseconds);
+  position = MeasurementLogger_AppendCharacter(buffer, position, ',');
+  position = MeasurementLogger_AppendUnsigned(buffer, position, context->above_upper_band_milliseconds);
+  position = MeasurementLogger_AppendCharacter(buffer, position, ',');
+  position = MeasurementLogger_AppendUnsigned(buffer, position, context->lockout_remaining_milliseconds);
+  position = MeasurementLogger_AppendCharacter(buffer, position, ',');
+  position = MeasurementLogger_AppendUnsigned(buffer, position, context->consecutive_sensor_failures);
   position = MeasurementLogger_AppendCharacter(buffer, position, ',');
   position = MeasurementLogger_AppendUnsigned(buffer, position, result->attempts_used);
   position = MeasurementLogger_AppendCharacter(buffer, position, ',');

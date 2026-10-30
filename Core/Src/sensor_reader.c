@@ -1,12 +1,12 @@
 #include "sensor_reader.h"
 
+#include "defrost_config.h"
 #include "main.h"
 
 #include <string.h>
 
 #define SENSOR_FRAME_START_MARKER  0xAAU
 #define SENSOR_FRAME_END_MARKER    0xACU
-#define UART_POLL_SLICE_MILLISECONDS  50U
 
 static void SensorReader_ClearResult(SensorReaderResult *result)
 {
@@ -68,7 +68,7 @@ static bool SensorReader_DecodeFrame(const uint8_t *frame,
   }
 
   temperature_bits = ((uint16_t)frame[1] << 8) | frame[2];
-  result->temperature_celsius = (int16_t)temperature_bits;
+  result->temperature_centi_celsius = (int16_t)temperature_bits;
   result->capacitance_picofarads = ((uint16_t)frame[3] << 8) | frame[4];
   memcpy(result->frame, frame, SENSOR_FRAME_LENGTH_BYTES);
   result->status = SENSOR_READER_STATUS_VALID;
@@ -84,17 +84,17 @@ static bool SensorReader_ReadPoweredStream(UART_HandleTypeDef *sensor_uart,
   uint32_t receive_start_tick = HAL_GetTick();
 
   while (SensorReader_ElapsedMilliseconds(receive_start_tick) <
-         SENSOR_RECEIVE_TIMEOUT_MILLISECONDS)
+         DEFROST_CFG_SENSOR_RX_TIMEOUT_MS)
   {
     uint8_t received_byte = 0U;
     uint32_t elapsed = SensorReader_ElapsedMilliseconds(receive_start_tick);
-    uint32_t remaining = SENSOR_RECEIVE_TIMEOUT_MILLISECONDS - elapsed;
+    uint32_t remaining = DEFROST_CFG_SENSOR_RX_TIMEOUT_MS - elapsed;
     uint32_t poll_timeout = remaining;
     HAL_StatusTypeDef receive_status;
 
-    if (poll_timeout > UART_POLL_SLICE_MILLISECONDS)
+    if (poll_timeout > DEFROST_CFG_SENSOR_UART_POLL_SLICE_MS)
     {
-      poll_timeout = UART_POLL_SLICE_MILLISECONDS;
+      poll_timeout = DEFROST_CFG_SENSOR_UART_POLL_SLICE_MS;
     }
 
     HAL_IWDG_Refresh(watchdog);
@@ -142,12 +142,14 @@ static bool SensorReader_ReadPoweredStream(UART_HandleTypeDef *sensor_uart,
 
 bool SensorReader_Acquire(UART_HandleTypeDef *sensor_uart,
                           IWDG_HandleTypeDef *watchdog,
+                          uint8_t maximum_attempts,
                           SensorReaderResult *result)
 {
   uint32_t acquisition_start_tick;
   uint8_t attempt;
 
-  if ((sensor_uart == NULL) || (watchdog == NULL) || (result == NULL))
+  if ((sensor_uart == NULL) || (watchdog == NULL) ||
+      (maximum_attempts == 0U) || (result == NULL))
   {
     return false;
   }
@@ -165,7 +167,7 @@ bool SensorReader_Acquire(UART_HandleTypeDef *sensor_uart,
     return false;
   }
 
-  for (attempt = 1U; attempt <= SENSOR_MAXIMUM_ACQUISITION_ATTEMPTS; ++attempt)
+  for (attempt = 1U; attempt <= maximum_attempts; ++attempt)
   {
     result->attempts_used = attempt;
     SensorReader_ClearUartReceiveState(sensor_uart);
@@ -176,7 +178,7 @@ bool SensorReader_Acquire(UART_HandleTypeDef *sensor_uart,
 
     if (SensorReader_ReadPoweredStream(sensor_uart, watchdog, result))
     {
-      HAL_Delay(SENSOR_POST_RECEIVE_MILLISECONDS);
+      HAL_Delay(DEFROST_CFG_SENSOR_POST_RX_ON_MS);
       HAL_GPIO_WritePin(CAP_SENSOR_EN_GPIO_Port, CAP_SENSOR_EN_Pin, GPIO_PIN_RESET);
       result->acquisition_duration_milliseconds =
           SensorReader_ElapsedMilliseconds(acquisition_start_tick);
@@ -185,10 +187,10 @@ bool SensorReader_Acquire(UART_HandleTypeDef *sensor_uart,
 
     HAL_GPIO_WritePin(CAP_SENSOR_EN_GPIO_Port, CAP_SENSOR_EN_Pin, GPIO_PIN_RESET);
 
-    if (attempt < SENSOR_MAXIMUM_ACQUISITION_ATTEMPTS)
+    if (attempt < maximum_attempts)
     {
       HAL_IWDG_Refresh(watchdog);
-      HAL_Delay(SENSOR_RETRY_OFF_MILLISECONDS);
+      HAL_Delay(DEFROST_CFG_SENSOR_RETRY_OFF_MS);
     }
   }
 
